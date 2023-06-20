@@ -158,6 +158,12 @@ struct TensorOpMultiplicand {
     int vec_strided_idx = coord.strided() / kFactor;
 
     // Compute the fundamental tile being accessed
+    // TileShape = <8, 4>
+
+    // int8 V
+    // TileShape: <8, 8>
+    // kCrosswise: 128
+    // kFactor: 1
     int tile_contiguous_idx =
         vec_contiguous_idx / (TileShape::kContiguous / kFactor);
 
@@ -199,6 +205,16 @@ struct TensorOpMultiplicand {
                              (coord.contiguous() % kElementsPerAccess);
 
     int element_strided = vec_strided_idx;
+
+    if(kCrosswise == 64 && ElementSize == 8){
+      auto batch_id = blockIdx.z;
+      auto head_id = blockIdx.y;
+      auto warp_id = threadIdx.y;
+      auto lane_id = threadIdx.x;
+      // printf("batch_id: %d, head_id: %d, warp_id: %d, lane_id: %d, stride_[0]: %d, kElementSize: %d, kElementsPerAccess: %d, kCrosswise: %d, kFactor: %d, coord.strided(): %d, coord.contiguous(): %d, element_strided: %d, element_contiguous: %d\n", batch_id, head_id, warp_id, lane_id, stride_[0], kElementSize, kElementsPerAccess, kCrosswise, kFactor, coord.strided(), coord.contiguous(), element_strided, element_contiguous);
+    }
+
+    // stride_[0] 64 or 96
 
     return element_contiguous + element_strided * stride_[0] * kFactor;
   }

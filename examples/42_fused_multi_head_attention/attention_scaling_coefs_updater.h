@@ -168,6 +168,15 @@ struct AttentionScalingCoefsUpdaterSm80
       FB op,
       FC endRow) {
     // See cutlass/gemm/warp/mma_tensor_op_tile_iterator.h
+    // InstructionShape::kN: 8
+    // InstructionShape::kM: 16
+    // Policy::MmaIterations::kRow: 2
+    // Policy::MmaIterations::kColumn: 4
+    // OpDelta::kRow: 1
+    // OpDelta::kColumn: 1
+    // kElementsPerAccess: 2
+    // kRowsPerTile: 8
+    // kAccumulatorRows: 2
     CUTLASS_PRAGMA_UNROLL
     for (int mma_m = 0; mma_m < Policy::MmaIterations::kRow; ++mma_m) {
       CUTLASS_PRAGMA_UNROLL

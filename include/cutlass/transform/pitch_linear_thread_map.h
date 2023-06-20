@@ -304,6 +304,40 @@ struct PitchLinearWarpRakedThreadMap {
   /// Maps thread ID to a coordinate offset within the tensor's logical coordinate space
   CUTLASS_HOST_DEVICE
   static TensorCoord initial_offset(int thread_id) {
+    // B matrix
+    // Shape::kContiguous: 32
+    // Shape::kStrided: 64
+    // kElementsPerAccess: 8
+    // Detail::WarpThreadArrangement::kContiguous: 4
+    // Detail::WarpThreadArrangement::kStrided: 8
+    // ShapeInAccesses::kContiguous: 4
+    // ShapeInAccesses::kStrided: 64
+    // Detail::WarpAccessIterations::kContiguous: 1
+    // Detail::WarpAccessIterations::kStrided: 8
+    // Detail::WarpArrangement::kContiguous: 1
+    // Detail::WarpArrangement::kStrided: 4
+    // Iterations::kContiguous: 1
+    // Iterations::kStrided: 2
+    // Delta::kContiguous: 32
+    // Delta::kStrided: 8
+
+    // matrix v
+    // Shape::kContiguous: 64
+    // Shape::kStrided: 32
+    // kElementsPerAccess: 16
+    // Detail::WarpThreadArrangement::kContiguous: 4
+    // Detail::WarpThreadArrangement::kStrided: 8
+    // ShapeInAccesses::kContiguous: 4
+    // ShapeInAccesses::kStrided: 32
+    // Detail::WarpAccessIterations::kContiguous: 1
+    // Detail::WarpAccessIterations::kStrided: 4
+    // Detail::WarpArrangement::kContiguous: 1
+    // Detail::WarpArrangement::kStrided: 4
+    // Iterations::kContiguous: 1, Iterations::kStrided: 1
+    // Delta::kContiguous: 64
+    // Delta::kStrided: 8
+
+    // printf("Shape::kContiguous: %d, Shape::kStrided: %d, kElementsPerAccess: %d, Detail::WarpThreadArrangement::kContiguous: %d, Detail::WarpThreadArrangement::kStrided: %d, ShapeInAccesses::kContiguous: %d, ShapeInAccesses::kStrided: %d, Detail::WarpAccessIterations::kContiguous: %d, Detail::WarpAccessIterations::kStrided: %d, Detail::WarpArrangement::kContiguous: %d, Detail::WarpArrangement::kStrided: %d, Iterations::kContiguous: %d, Iterations::kStrided: %d, Delta::kContiguous: %d, Delta::kStrided: %d\n", Shape::kContiguous, Shape::kStrided, kElementsPerAccess, Detail::WarpThreadArrangement::kContiguous, Detail::WarpThreadArrangement::kStrided, Detail::ShapeInAccesses::kContiguous, Detail::ShapeInAccesses::kStrided, Detail::WarpAccessIterations::kContiguous, Detail::WarpAccessIterations::kStrided, Detail::WarpArrangement::kContiguous, Detail::WarpArrangement::kStrided, Iterations::kContiguous, Iterations::kStrided, Delta::kContiguous, Delta::kStrided);
 
     int warp_id = (thread_id / Detail::kWarpSize);
     int lane_id = (thread_id % Detail::kWarpSize);

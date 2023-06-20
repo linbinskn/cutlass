@@ -138,6 +138,10 @@ class RegularTileAccessIterator<
         byte_offset_(0) {
     layout::PitchLinearCoord thread_offset_base =
         ThreadMap::initial_offset(thread_id);
+    
+    // ThreadMap::Iterations::kContiguous: 1
+    // ThreadMap::Iterations::kStrided: 1
+    // ThreadMap::Detail::WarpThreadArrangement::kStrided: 8
 
     CUTLASS_PRAGMA_UNROLL
     for (int i = 0; i < Detail::kPointerCount; ++i) {
@@ -151,6 +155,7 @@ class RegularTileAccessIterator<
       // initialize pointer
       pointer_[i] = reinterpret_cast<AccessType *>(
           ref.data() + ref.offset(thread_offset_in_threadblock_tile));
+      // printf("kPointerCount: %d, thread_id: %d, thread_offset_in_threadblock_tile.contiguous(): %d, thread_offset_in_threadblock_tile.strided(): %d\n", i, thread_id, thread_offset_in_threadblock_tile.contiguous(), thread_offset_in_threadblock_tile.strided());
     }
 
     set_iteration_index(0);
@@ -379,7 +384,9 @@ class RegularTileAccessIterator<
   RegularTileAccessIterator(TensorRef ref,  ///< Pointer to start of tensor
                             int thread_id   ///< ID of each participating thread
                             )
-      : iterator_({ref.data(), ref.stride()}, thread_id) {}
+      : iterator_({ref.data(), ref.stride()}, thread_id) {
+        // printf("Shape::kContiguous: %d, Shape::kStrided: %d, kElementsPerAccess: %d, Detail::WarpThreadArrangement::kContiguous: %d, Detail::WarpThreadArrangement::kStrided: %d, ShapeInAccesses::kContiguous: %d, ShapeInAccesses::kStrided: %d, Detail::WarpAccessIterations::kContiguous: %d, Detail::WarpAccessIterations::kStrided: %d, Detail::WarpArrangement::kContiguous: %d, Detail::WarpArrangement::kStrided: %d, Iterations::kContiguous: %d, Iterations::kStrided: %d, Delta::kContiguous: %d, Delta::kStrided: %d\n", ThreadMap::Shape::kContiguous, ThreadMap::Shape::kStrided, ThreadMap::kElementsPerAccess, ThreadMap::Detail::WarpThreadArrangement::kContiguous, ThreadMap::Detail::WarpThreadArrangement::kStrided, ThreadMap::Detail::ShapeInAccesses::kContiguous, ThreadMap::Detail::ShapeInAccesses::kStrided, ThreadMap::Detail::WarpAccessIterations::kContiguous, ThreadMap::Detail::WarpAccessIterations::kStrided, ThreadMap::Detail::WarpArrangement::kContiguous, ThreadMap::Detail::WarpArrangement::kStrided, ThreadMap::Iterations::kContiguous, ThreadMap::Iterations::kStrided, ThreadMap::Delta::kContiguous, ThreadMap::Delta::kStrided);
+      }
 
   /// Overrides the internal iteration index
   CUTLASS_HOST_DEVICE
@@ -525,6 +532,12 @@ class RegularTileAccessIterator<Shape_, Element_,
         // stride_ = kCrosswise x sections_ x kFactor
         stride_(ref.stride(0) * Layout::kFactor / Layout::kElementsPerAccess),
         byte_offset_(0) {
+    // kCrosswise: 32
+    // sections_per_stage_: 1
+    // Detail::kPointerCount: 2
+    // sections_: 3
+    // ref.stride(0): 96 (stage(3) * 32)
+    // stride_: 24
     layout::PitchLinearCoord thread_offset_base =
         ThreadMap::initial_offset(thread_id);
 
@@ -561,6 +574,10 @@ class RegularTileAccessIterator<Shape_, Element_,
   /// Returns a pointer
   CUTLASS_HOST_DEVICE
   AccessType *get() const {
+    // iteration_strided_: [0, 1]
+    // Layout::kFactor: 2
+    // Layout::TileShape::kContiguous: 8
+    // stride_: 24
     AccessType *access_ptr = pointer_[iteration_strided_ & 1];
     int stride_idx = (iteration_strided_ & ~1);
 
@@ -611,6 +628,10 @@ class RegularTileAccessIterator<Shape_, Element_,
   /// Adds a tile offset
   CUTLASS_DEVICE
   void add_tile_offset(TensorCoord const &coord) {
+    // coord.contiguous(): 1
+    // coord.strided(): 0
+    // sections_: 3
+    // "sections_per_stage_ * stride_ * ThreadMap::kElementsPerAccess / sections_: 64
     add_pointer_offset(coord.contiguous() * sections_per_stage_ * stride_ *
                            ThreadMap::kElementsPerAccess / sections_ +
                        coord.strided() * Shape::kStrided * stride_ *

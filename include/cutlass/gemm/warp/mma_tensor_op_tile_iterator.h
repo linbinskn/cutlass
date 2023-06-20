@@ -122,6 +122,7 @@ class MmaTensorOpMultiplicandTileIterator<
   using Element = Element_;
 
   /// Layout of source tile
+  // Layout = <16, 64>
   using Layout = cutlass::layout::TensorOpMultiplicandCongruous<
       sizeof_bits<Element_>::value, 64>;
 
@@ -223,6 +224,8 @@ private:
   Index byte_offset_;
 
 public:
+  int lane_id_;
+  int iteration_;
   
   /// Default ctor constructs null iterator
   CUTLASS_HOST_DEVICE
@@ -236,6 +239,19 @@ public:
   ):
     stride_(ref.stride(0) / Layout::kElementsPerAccess), byte_offset_(0),
     k_group_idx_(0) {
+
+    iteration_ = 0;
+
+    lane_id_ = lane_id;
+
+    // stride_: 8
+    // Layout::kElementsPerAccess: 8
+    // kPointerCount: 2
+    // Policy::LdsmShape::kContiguous: 4
+    // Layout::PartitionShape::kStrided: 4
+    // Policy::kGroupsPerTile: 4
+    // Policy::LdsmIterations::kContiguous: 1
+    // Policy::LdsmIterations::kStrided: 1
       
     int quad_pair = (lane_id >> 3);
     int quad_quad = (lane_id >> 4);
@@ -291,6 +307,11 @@ public:
 
       int access_strided = access_strided_idx;
 
+      auto batch_id = blockIdx.z;
+      auto head_id = blockIdx.y;
+      auto warp_id = threadIdx.y;
+      // printf("batch_id: %d, head_id: %d, warp_id: %d, lane_id_: %d, kPointerCountID: %d, access_contiguous: %d, access_strided: %d, partition_contiguous_idx: %d, access_contiguous_idx: %d\n", batch_id, head_id, warp_id, lane_id_, i, access_contiguous, access_strided, partition_contiguous_idx, access_contiguous_idx);
+
       pointer_[i] = reinterpret_cast<AccessType const *>(ref.data()) +
                     access_contiguous + access_strided * stride_;
     }
@@ -310,6 +331,10 @@ public:
   MmaTensorOpMultiplicandTileIterator &add_tile_offset(TensorCoord const &tile_offset) {
 
     int contiguous_offset = tile_offset.contiguous();
+    auto batch_id = blockIdx.z;
+    auto head_id = blockIdx.y;
+    auto warp_id = threadIdx.y;
+    // printf("batch_id: %d, head_id: %d, warp_id: %d, lane_id_: %d, kPointerCount: %d, contiguous_offset: %d\n", batch_id, head_id, warp_id, lane_id_, kPointerCount, contiguous_offset);
     if (Shape::kContiguous ==
         Layout::PartitionShape::kContiguous * Layout::kElementsPerAccess) {
       if (tile_offset.contiguous() % 2) {
@@ -335,7 +360,7 @@ public:
   /// Advances the iterator along the advance dimension
   CUTLASS_DEVICE
   MmaTensorOpMultiplicandTileIterator & operator++() {
-
+    iteration_ += 1;
     add_tile_offset({0, 1});
 
     if (kPartitionsK > 1) {
@@ -411,6 +436,12 @@ public:
           fetch_ptr[access_idx],
           source_byte_ptr
         );
+        auto batch_id = blockIdx.z;
+        auto head_id = blockIdx.y;
+        auto warp_id = threadIdx.y;
+        // printf("iteration_: %d, sizeof_bits<Element>::value: %d, Policy::LdsmShape::kCount: %d, batch_id: %d, head_id: %d, warp_id: %d, lane_id: %d, sb[0]: %f, sb[1]: %f, sb[2]: %f, sb[3]: %f, sb[4]: %f, sb[5]: %f, sb[6]: %f, sb[7]: %f, sx[0]: %f, sx[1]: %f, sx[2]: %f, sx[3]: %f, sx[4]: %f, sx[5]: %f, sx[6]: %f, sx[7]: %f\n", iteration_, sizeof_bits<Element>::value, Policy::LdsmShape::kCount, batch_id, head_id, warp_id, lane_id_, float(*((int8_t *)source_byte_ptr+0)), float(*((int8_t *)source_byte_ptr+8)), float(*((int8_t *)source_byte_ptr+16)), float(*((int8_t *)source_byte_ptr+24)), float(*((int8_t *)source_byte_ptr+32)), float(*((int8_t *)source_byte_ptr+40)), float(*((int8_t *)source_byte_ptr+48)), float(*((int8_t *)source_byte_ptr+56)), float(*((int8_t *)source_byte_ptr+64)), float(*((int8_t *)source_byte_ptr+72)), float(*((int8_t *)source_byte_ptr+80)), float(*((int8_t *)source_byte_ptr+88)), float(*((int8_t *)source_byte_ptr+96)), float(*((int8_t *)source_byte_ptr+104)), float(*((int8_t *)source_byte_ptr+112)), float(*((int8_t *)source_byte_ptr+120)));
+        // printf("iteration_: %d, sizeof_bits<Element>::value: %d, Policy::LdsmShape::kCount: %d, batch_id: %d, head_id: %d, warp_id: %d, lane_id: %d, sb[0]: %f, sb[1]: %f, sb[2]: %f, sb[3]: %f, sb[4]: %f, sb[5]: %f, sb[6]: %f, sb[7]: %f, sx[0]: %f, sx[1]: %f, sx[2]: %f, sx[3]: %f, sx[4]: %f, sx[5]: %f, sx[6]: %f, sx[7]: %f\n", iteration_, sizeof_bits<Element>::value, Policy::LdsmShape::kCount, batch_id, head_id, warp_id, lane_id_, float(*((int8_t *)source_byte_ptr+0)), float(*((int8_t *)source_byte_ptr+1)), float(*((int8_t *)source_byte_ptr+2)), float(*((int8_t *)source_byte_ptr+3)), float(*((int8_t *)source_byte_ptr+4)), float(*((int8_t *)source_byte_ptr+5)), float(*((int8_t *)source_byte_ptr+6)), float(*((int8_t *)source_byte_ptr+7)), float(*((int8_t *)fetch_ptr+0)), float(*((int8_t *)fetch_ptr+1)), float(*((int8_t *)fetch_ptr+2)), float(*((int8_t *)fetch_ptr+3)), float(*((int8_t *)fetch_ptr+4)), float(*((int8_t *)fetch_ptr+5)), float(*((int8_t *)fetch_ptr+6)), float(*((int8_t *)fetch_ptr+7)));
+        // printf("iteration_: %d, sizeof_bits<Element>::value: %d, Policy::LdsmShape::kCount: %d, batch_id: %d, head_id: %d, warp_id: %d, lane_id: %d, sb[0]: %f, sb[1]: %f, sb[2]: %f, sb[3]: %f, sb[4]: %f, sb[5]: %f, sb[6]: %f, sb[7]: %f, sx[0]: %f, sx[1]: %f, sx[2]: %f, sx[3]: %f, sx[4]: %f, sx[5]: %f, sx[6]: %f, sx[7]: %f\n", iteration_, sizeof_bits<Element>::value, Policy::LdsmShape::kCount, batch_id, head_id, warp_id, lane_id_, float(*((Element *)source_byte_ptr+0)), float(*((Element *)source_byte_ptr+1)), float(*((Element *)source_byte_ptr+2)), float(*((Element *)source_byte_ptr+3)), float(*((Element *)source_byte_ptr+4)), float(*((Element *)source_byte_ptr+5)), float(*((Element *)source_byte_ptr+6)), float(*((Element *)source_byte_ptr+7)), float(*((Element *)fetch_ptr+0)), float(*((Element *)fetch_ptr+1)), float(*((Element *)fetch_ptr+2)), float(*((Element *)fetch_ptr+3)), float(*((Element *)fetch_ptr+4)), float(*((Element *)fetch_ptr+5)), float(*((Element *)fetch_ptr+6)), float(*((Element *)fetch_ptr+7)));
       }
     }
   }
@@ -1336,6 +1367,7 @@ class MmaTensorOpMultiplicandTileIterator<
                                                    Crosswise>,
     InstructionShape_, OpDelta_, 32, PartitionsK_> {
  public:
+ int lane_id_;
   /// Shape of tile to load (concept: PitchLinearShape)
   using Shape = Shape_;
 
@@ -1488,6 +1520,8 @@ class MmaTensorOpMultiplicandTileIterator<
     lane_id = lane_id % (Policy::LdsmShape::kCount * Policy::kLdsmOpInner);
 #endif
 
+    lane_id_ = lane_id;
+
     int quad_quad = (lane_id >> 4);
     int quad_pair = (lane_id >> 3);
     int lane_in_pair = (lane_id & 1);
@@ -1498,6 +1532,20 @@ class MmaTensorOpMultiplicandTileIterator<
     int partition_contiguous_idx = -1;
     int access_contiguous_idx = -1;
     int access_strided_idx = -1;
+
+
+    // stride_: 24
+    // Layout::kFactor: 2
+    // Policy::LdsmShape::kContiguous: 1
+    // Policy::LdsmShape::kStrided: 4
+    // Shape::kStrided: 32
+    // Shape::kContiguous: 32
+    // InstructionShape::kStrided: 16
+    // InstructionShape::kContiguous: 8
+    // Policy::LdsmIterations::kContiguous: 1
+    // Policy::LdsmIterations::kStrided: 1
+    // Layout::PartitionShape::kContiguous: 4
+    // Layout::PartitionShape::kStrided: 4
 
     if (Layout::kFactor == 4) {
       // Super Integer matrix multiply Interleaved-32
@@ -1713,6 +1761,11 @@ class MmaTensorOpMultiplicandTileIterator<
     // Matrix multiply 16816 kblock=64 | 1688.TF32 kblock=32 || Integer matrix multiply 16832 kblock=128
     //   ^2 ^6 ^2 ^6
 
+    // Policy::kGroupsPerTile: 4
+    // kPartitionsK: 1
+    // Layout::kElementsPerAccess: 8
+    // xor_val 0: 16
+    // xor_val 1: 48
     if ((Policy::kGroupsPerTile / kPartitionsK) > 1) {
       int mask = ((Policy::kGroupsPerTile / kPartitionsK) == 8)
                      ? 3
@@ -1784,6 +1837,9 @@ class MmaTensorOpMultiplicandTileIterator<
       for (int c = 0; c < Policy::LdsmIterations::kContiguous; ++c) {
         int access_idx = c + s * Policy::LdsmIterations::kContiguous;
 
+        // access_idx: 0
+        // stride_: 24
+
         AccessType const *source_ptr =
             pointer_ + Policy::LdsmShape::kContiguous * c +
             Policy::kLdsmOpInner / Layout::kFactor *
@@ -1795,6 +1851,11 @@ class MmaTensorOpMultiplicandTileIterator<
 
         cutlass::arch::ldsm<layout::RowMajor, Policy::LdsmShape::kCount>(
             fetch_ptr[access_idx], source_byte_ptr);
+        auto batch_id = blockIdx.z;
+        auto head_id = blockIdx.y;
+        // printf("sizeof_bits<Element>::value: %d, Policy::LdsmShape::kCount: %d, batch_id: %d, head_id: %d,lane_id: %d, sb[0]: %f, sb[1]: %f, sb[2]: %f, sb[3]: %f, sb[4]: %f, sb[5]: %f, sb[6]: %f, sb[7]: %f, sx[0]: %f, sx[1]: %f, sx[2]: %f, sx[3]: %f, sx[4]: %f, sx[5]: %f, sx[6]: %f, sx[7]: %f\n", sizeof_bits<Element>::value, Policy::LdsmShape::kCount, batch_id, head_id, lane_id_, float(*((int8_t *)source_byte_ptr+0)), float(*((int8_t *)source_byte_ptr+1)), float(*((int8_t *)source_byte_ptr+2)), float(*((int8_t *)source_byte_ptr+3)), float(*((int8_t *)source_byte_ptr+4)), float(*((int8_t *)source_byte_ptr+5)), float(*((int8_t *)source_byte_ptr+6)), float(*((int8_t *)source_byte_ptr+7)), float(*((int8_t *)fetch_ptr+0)), float(*((int8_t *)fetch_ptr+1)), float(*((int8_t *)fetch_ptr+2)), float(*((int8_t *)fetch_ptr+3)), float(*((int8_t *)fetch_ptr+4)), float(*((int8_t *)fetch_ptr+5)), float(*((int8_t *)fetch_ptr+6)), float(*((int8_t *)fetch_ptr+7)));
+        // printf("sizeof_bits<Element>::value: %d, Policy::LdsmShape::kCount: %d, batch_id: %d, head_id: %d,lane_id: %d, sb[0]: %f, sb[1]: %f, sb[2]: %f, sb[3]: %f, sb[4]: %f, sb[5]: %f, sb[6]: %f, sb[7]: %f, sx[0]: %f, sx[1]: %f, sx[2]: %f, sx[3]: %f, sx[4]: %f, sx[5]: %f, sx[6]: %f, sx[7]: %f\n", sizeof_bits<Element>::value, Policy::LdsmShape::kCount, batch_id, head_id, lane_id_, float(*((Element *)source_byte_ptr+0)), float(*((Element *)source_byte_ptr+1)), float(*((Element *)source_byte_ptr+2)), float(*((Element *)source_byte_ptr+3)), float(*((Element *)source_byte_ptr+4)), float(*((Element *)source_byte_ptr+5)), float(*((Element *)source_byte_ptr+6)), float(*((Element *)source_byte_ptr+7)), float(*((Element *)fetch_ptr+0)), float(*((Element *)fetch_ptr+1)), float(*((Element *)fetch_ptr+2)), float(*((Element *)fetch_ptr+3)), float(*((Element *)fetch_ptr+4)), float(*((Element *)fetch_ptr+5)), float(*((Element *)fetch_ptr+6)), float(*((Element *)fetch_ptr+7)));
+        // printf("\n", float(*((Element *)fetch_ptr+0)), float(*((Element *)fetch_ptr+1)), float(*((Element *)fetch_ptr+2)), float(*((Element *)fetch_ptr+3)));
       }
     }
   }

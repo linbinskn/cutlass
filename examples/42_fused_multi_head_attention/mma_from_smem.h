@@ -560,6 +560,7 @@ template <
     typename Policy1_,
     /// Number of stages,
     int Stages_,
+    typename VscaleGlobalIterator_,
     /// Used for partial specialization
     typename Enable = bool>
 class MmaMultistageFromSharedMemory : public MmaBaseFromSharedMemory<
@@ -592,8 +593,14 @@ class MmaMultistageFromSharedMemory : public MmaBaseFromSharedMemory<
   ///< Layout of accumulator matrix
   using LayoutC = LayoutC_;
 
+  using VscaleGlobalIterator = VscaleGlobalIterator_;
+
   static cutlass::arch::CacheOperation::Kind const kCacheOpB1 = CacheOpB1;
   static constexpr bool kSmemContainsEntireB = Base::kSmemContainsEntireB;
+
+  using BsmemTensorRef = typename SmemIteratorB1::TensorRef;
+  using BsmemElement = typename SmemIteratorB1::Element;
+  using BsmemLayout = typename SmemIteratorB1::Layout;
 
   //
   // Dependent types
@@ -634,9 +641,12 @@ class MmaMultistageFromSharedMemory : public MmaBaseFromSharedMemory<
 
  private:
   using WarpLoadedFragmentA1 = typename Operator1::FragmentA;
-  using WarpLoadedFragmentB1 = typename Operator1::FragmentB;
+  using WarpLoadedFragmentB1 = typename Operator1::IteratorB::RealFragment;
+  using WarpLoadedDequantFragmentB1 = typename Operator1::IteratorB::Fragment;
   using WarpTransformedFragmentA1 = typename Operator1::TransformedFragmentA;
   using WarpTransformedFragmentB1 = typename Operator1::TransformedFragmentB;
+
+  using ScaleLoadFragment = typename VscaleGlobalIterator::Fragment;
 
  private:
   //
@@ -672,13 +682,18 @@ class MmaMultistageFromSharedMemory : public MmaBaseFromSharedMemory<
         warp_tile_iterator_A1_(
             accumulator_shared_storage.accum_ref(),
             lane_idx),
-        smem_iterator_B1_(shared_storage.operand_B_ref(), thread_idx),
+        smem_iterator_B1_(BsmemTensorRef{((BsmemElement *)shared_storage.operand_B_ref().data()), BsmemLayout::packed({Base::SharedStorage::ShapeB::kRow, Base::SharedStorage::ShapeB::kColumn})}, thread_idx),
         prologue_done_(false) {
     // Compute warp location within threadblock tile by mapping the warp_id to
     // three coordinates:
     //   _m: the warp's position within the threadblock along the M dimension
     //   _n: the warp's position within the threadblock along the N dimension
     //   _k: the warp's position within the threadblock along the K dimension
+
+    // Base::kWarpGemmIterations1: 4
+    // Base::SharedStorage::ShapeB::kRow: 64
+    // Base::SharedStorage::ShapeB::kColumn: 64
+    // Base::kStages: 2
 
     int warp_idx_mn_1 =
         warp_idx % (Base::WarpCount1::kM * Base::WarpCount1::kN);
@@ -690,8 +705,8 @@ class MmaMultistageFromSharedMemory : public MmaBaseFromSharedMemory<
     // Add per-warp offsets in units of warp-level tiles
     warp_tile_iterator_A1_.add_tile_offset(
         {warp_idx_m_1, Base::kWarpGemmIterations1 * warp_idx_k_1});
-    this->warp_tile_iterator_B_.add_tile_offset(
-        {Base::kWarpGemmIterations1 * warp_idx_k_1, warp_idx_n_1});
+    // this->warp_tile_iterator_B_.add_tile_offset(
+    //    {Base::kWarpGemmIterations1 * warp_idx_k_1, warp_idx_n_1});
   }
 
   CUTLASS_DEVICE
@@ -705,7 +720,7 @@ class MmaMultistageFromSharedMemory : public MmaBaseFromSharedMemory<
       IteratorB iterator_B1,
       int thread_idx,
       int problem_size_0_n) {
-    SmemIteratorB1 smem_iterator_B1(shared_storage.operand_B_ref(), thread_idx);
+    SmemIteratorB1 smem_iterator_B1(BsmemTensorRef{((BsmemElement *)shared_storage.operand_B_ref().data()), BsmemLayout::packed({Base::SharedStorage::ShapeB::kRow, Base::SharedStorage::ShapeB::kColumn})}, thread_idx);
     _prologue(
         iterator_B1,
         (problem_size_0_n + Base::Shape::kK - 1) / Base::Shape::kK,
@@ -805,6 +820,7 @@ class MmaMultistageFromSharedMemory : public MmaBaseFromSharedMemory<
       FragmentC1& accum,
       ///< iterator over B1 operand in global memory
       IteratorB1 iterator_B1,
+      VscaleGlobalIterator iterator_scale,
       ///< initial value of accumulator
       FragmentC1 const& src_accum) {
     // 2nd Gemm
@@ -852,8 +868,12 @@ class MmaMultistageFromSharedMemory : public MmaBaseFromSharedMemory<
     // instructions
     WarpLoadedFragmentA1 warp_loaded_frag_A1[2];
     WarpLoadedFragmentB1 warp_loaded_frag_B1[2];
+    WarpLoadedDequantFragmentB1 warp_loaded_dequant_frag_B1[2];
     WarpTransformedFragmentA1 warp_transformed_frag_A1[2];
     WarpTransformedFragmentB1 warp_transformed_frag_B1[2];
+
+    ScaleLoadFragment frag_scale;
+    iterator_scale.load(frag_scale);
 
     Operator1 warp_mma1;
 
@@ -867,11 +887,20 @@ class MmaMultistageFromSharedMemory : public MmaBaseFromSharedMemory<
     int smem_write_stage_idx = Base::kStages - 1;
     int smem_read_stage_idx = 0;
 
+    auto batch_id = blockIdx.z;
+    auto head_id = blockIdx.y;
+    auto warp_id = threadIdx.y;
+    auto lane_id = threadIdx.x;
+    // printf("batch_id: %d, head_id: %d, warp_id: %d, lane_id_: %d, frag[0]: %d, scale[0]: %d, frag[1]: %d, scale[0]: %d, frag[2]: %d, scale[1]: %d, frag[3]: %d, scale[1]: %d, frag[4]: %d, scale[2]: %d, frag[5]: %d, scale[2]: %d, frag[6]: %d, scale[3]: %d, frag[7]: %d, scale[3]: %d\n", batch_id, head_id, warp_id, lane_id,(int)warp_loaded_frag_B1[0][0], (int)frag_scale[0], (int)warp_loaded_frag_B1[0][1], (int)frag_scale[0], (int)warp_loaded_frag_B1[0][2], (int)frag_scale[1], (int)warp_loaded_frag_B1[0][3], (int)frag_scale[1], (int)warp_loaded_frag_B1[0][4], (int)frag_scale[2], (int)warp_loaded_frag_B1[0][5], (int)frag_scale[2], (int)warp_loaded_frag_B1[0][6], (int)frag_scale[3], (int)warp_loaded_frag_B1[0][7], (int)frag_scale[3]);
+    for(int j = 0; j < 8; j += 1){
+      warp_loaded_dequant_frag_B1[0][j] = (cutlass::half_t)(((ElementC)(warp_loaded_frag_B1[0][j])) * (ElementC(frag_scale[j / 2])));
+    }
+
     warp_mma1.transform(
         warp_transformed_frag_A1[0],
         warp_transformed_frag_B1[0],
         warp_loaded_frag_A1[0],
-        warp_loaded_frag_B1[0]);
+        warp_loaded_dequant_frag_B1[0]);
 
     // tf32x3 kernels use staging accumulation. warp_mma uses a temporary
     // accumulator and this temporary accumulator is added to the final
@@ -921,12 +950,16 @@ class MmaMultistageFromSharedMemory : public MmaBaseFromSharedMemory<
         ++warp_tile_iterator_A1_;
         ++this->warp_tile_iterator_B_;
 
-        if (warp_mma_k > 0)
+        if (warp_mma_k > 0){
+          for(int j = 0; j < 8; j += 1){
+            warp_loaded_dequant_frag_B1[warp_mma_k % 2][j] = (cutlass::half_t)(((ElementC)warp_loaded_frag_B1[warp_mma_k % 2][j]) * (ElementC(frag_scale[j / 2])));
+          }
           warp_mma1.transform(
               warp_transformed_frag_A1[warp_mma_k % 2],
               warp_transformed_frag_B1[warp_mma_k % 2],
               warp_loaded_frag_A1[warp_mma_k % 2],
-              warp_loaded_frag_B1[warp_mma_k % 2]);
+              warp_loaded_dequant_frag_B1[warp_mma_k % 2]);
+        }
 
         if (platform::is_same<
                 typename Operator1::MathOperator,
@@ -1011,12 +1044,16 @@ class MmaMultistageFromSharedMemory : public MmaBaseFromSharedMemory<
 
         // Do any conversions feeding the first stage at the end of the loop so
         // we can start right away on mma instructions
-        if (warp_mma_k + 1 == Base::kWarpGemmIterations1)
+        if (warp_mma_k + 1 == Base::kWarpGemmIterations1){
+          for(int j = 0; j < 8; j += 1){
+            warp_loaded_dequant_frag_B1[(warp_mma_k + 1) % 2][j] = (cutlass::half_t)(((ElementC)warp_loaded_frag_B1[(warp_mma_k + 1) % 2][j]) * (ElementC(frag_scale[j / 2])));
+          }
           warp_mma1.transform(
               warp_transformed_frag_A1[(warp_mma_k + 1) % 2],
               warp_transformed_frag_B1[(warp_mma_k + 1) % 2],
               warp_loaded_frag_A1[(warp_mma_k + 1) % 2],
-              warp_loaded_frag_B1[(warp_mma_k + 1) % 2]);
+              warp_loaded_dequant_frag_B1[(warp_mma_k + 1) % 2]);
+        }
       }
     }
 
@@ -1099,7 +1136,7 @@ struct DefaultWarpIteratorAFromSharedMemory<
 };
 
 // Converts a "regular" Mma into their counterpart from shared memory
-template <typename Mma_, typename AccumulatorSharedStorage>
+template <typename Mma_, typename AccumulatorSharedStorage, typename VscaleGlobalIterator>
 struct DefaultMmaFromSharedMemory;
 
 // Mma pipelined
@@ -1130,7 +1167,8 @@ template <
     typename TransformA_,
     /// Transformation applied to B operand
     typename TransformB_,
-    typename AccumulatorSharedStorage_>
+    typename AccumulatorSharedStorage_,
+    typename VscaleGlobalIterator_>
 struct DefaultMmaFromSharedMemory<
     MmaPipelined<
         Shape_,
@@ -1143,7 +1181,8 @@ struct DefaultMmaFromSharedMemory<
         Policy_,
         TransformA_,
         TransformB_>,
-    AccumulatorSharedStorage_> {
+    AccumulatorSharedStorage_,
+    VscaleGlobalIterator_> {
   static constexpr int kWarpSize = 32;
   using SmemAccumulatorLayout = cutlass::layout::RowMajor;
 
@@ -1214,7 +1253,8 @@ template <
     int Stages,
     /// Use zfill or predicate for out-of-bound cp.async
     SharedMemoryClearOption SharedMemoryClear,
-    typename AccumulatorSharedStorage_>
+    typename AccumulatorSharedStorage_,
+    typename VscaleGlobalIterator_>
 struct DefaultMmaFromSharedMemory<
     MmaMultistage<
         Shape_,
@@ -1229,7 +1269,8 @@ struct DefaultMmaFromSharedMemory<
         Policy_,
         Stages,
         SharedMemoryClear>,
-    AccumulatorSharedStorage_> {
+        AccumulatorSharedStorage_,
+        VscaleGlobalIterator_> {
   static constexpr int kWarpSize = 32;
 
   using RegularMma = MmaMultistage<
@@ -1274,7 +1315,8 @@ struct DefaultMmaFromSharedMemory<
           ElementC_,
           LayoutC_,
           Policy_,
-          kStages>;
+          kStages,
+          VscaleGlobalIterator_>;
 };
 
 /////////////////////////////////////////////////////////////////////////////////////////////////

@@ -522,6 +522,10 @@ class PredicatedTileAccessIterator<Shape_, Element_, layout::PitchLinear,
           pointer_ += params_.inc_advance_ * LongIndex(tile_offset.strided());
           pointer_ += Shape::kContiguous * tile_offset.contiguous();
         } else {
+          // params_.inc_advance_: 64
+          // tile_offset.contiguous: 1
+          // tile_offset.strided: 0
+          // Shape::kContiguous: 32
           pointer_ += params_.inc_advance_ * LongIndex(tile_offset.contiguous());
           pointer_ += Shape::kStrided * tile_offset.strided();
         }

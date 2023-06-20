@@ -11,11 +11,12 @@
     This is really only for the FastF32 case - aka using TensorCores with fp32.
 */
 
-#include "cutlass/gemm/threadblock/default_mma.h"
+#include "cutlass/gemm/threadblock/default_mma_scale.h"
 #include "cutlass/gemm/threadblock/default_mma_core_simt.h"
 #include "cutlass/gemm/threadblock/default_mma_core_sm70.h"
 #include "cutlass/gemm/threadblock/default_mma_core_sm75.h"
 #include "cutlass/gemm/threadblock/default_mma_core_sm80.h"
+#include "cutlass/gemm/threadblock/mma_multistage_scale.h"
 
 namespace cutlass {
 namespace gemm {
@@ -52,12 +53,13 @@ template <
     int Stages,
     /// Operation perfomed by GEMM
     typename Operator,
+    typename IteratorScale,
     typename Enable_ = void>
 struct FindDefaultMma {
   static constexpr bool AccumulatorsInRowMajor = false;
   static constexpr SharedMemoryClearOption SharedMemoryClear =
       SharedMemoryClearOption::kNone;
-  using DefaultMma = cutlass::gemm::threadblock::DefaultMma<
+  using DefaultMma = cutlass::gemm::threadblock::DefaultMma_Scale<
       ElementA,
       LayoutA,
       kAlignmentA,
@@ -97,7 +99,8 @@ template <
     /// Instruction-level tile size (concept: GemmShape)
     typename InstructionShape,
     int kStages,
-    typename Operator>
+    typename Operator,
+    typename IteratorScale>
 struct FindDefaultMma<
     ElementA_,
     LayoutA_,
@@ -114,12 +117,13 @@ struct FindDefaultMma<
     InstructionShape,
     kStages,
     Operator,
+    IteratorScale,
     typename cutlass::platform::enable_if<(kAlignmentA > 1)>::type> {
   using LayoutC = layout::RowMajor;
   using OperatorClass = arch::OpClassTensorOp;
   using ArchTag = arch::Sm80;
 
-  using DefaultMma_ = cutlass::gemm::threadblock::DefaultMma<
+  using DefaultMma_ = cutlass::gemm::threadblock::DefaultMma_Scale<
       ElementA_,
       LayoutA_,
       kAlignmentA,
@@ -138,7 +142,7 @@ struct FindDefaultMma<
   struct DefaultMma : DefaultMma_ {
     using MmaCore_ = typename DefaultMma_::MmaCore;
     // Define the threadblock-scoped multistage matrix multiply
-    using ThreadblockMma = cutlass::gemm::threadblock::MmaMultistage<
+    using ThreadblockMma = cutlass::gemm::threadblock::MmaMultistage_Scale<
         typename MmaCore_::Shape,
         typename DefaultMma_::IteratorA,
         typename MmaCore_::SmemIteratorA,
@@ -149,7 +153,8 @@ struct FindDefaultMma<
         ElementAccumulator,
         LayoutC,
         typename MmaCore_::MmaPolicy,
-        kStages>;
+        kStages,
+        IteratorScale>;
   };
 };
 
